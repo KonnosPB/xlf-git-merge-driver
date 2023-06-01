@@ -1,0 +1,29 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<xliff version="1.2"
+  xmlns="urn:oasis:names:tc:xliff:document:1.2"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 xliff-core-1.2-transitional.xsd">
+  <file datatype="xml" source-language="en-US" target-language="de-DE" original="Test" tool-id="MultilingualAppToolkit" product-name="n/a" product-version="n/a" build-num="n/a">
+    <header>
+      <tool tool-id="MultilingualAppToolkit" tool-name="Multilingual App Toolkit" tool-version="4.0.1915.0" tool-company="Microsoft" />
+    </header>
+    <body>
+      <group id="body" datatype="resx">
+        <trans-unit id="ID1" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Original1</source>
+          <target state="translated">Translation1</target>
+          <note from="Xliff Generator" annotates="general" priority="3">Table Test - Property Caption</note>
+        </trans-unit>       
+         <trans-unit id="ID2" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Original1</source>
+          <target state="translated">Translation2</target>
+          <note from="Xliff Generator" annotates="general" priority="3">Table Test - Property Caption</note>
+        </trans-unit>  
+         <trans-unit id="ID3" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Original1</source>
+          <target state="translated">Translation3</target>
+          <note from="Xliff Generator" annotates="general" priority="3">Table Test - Property Caption</note>
+        </trans-unit>  
+      </group>
+    </body>
+  </file>
+</xliff>
