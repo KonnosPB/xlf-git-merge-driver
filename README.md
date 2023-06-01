@@ -101,7 +101,10 @@ Wird mit (a)bort abgebrochen, beendet sich das Powershell-Skript mit einem Exit-
 
 ## Installation
 
-### 1. Im ersten Schritt muss die Git-Konfigurationsdatei `.git/config` angepasst werden.
+### 1. XLF Git-Merge-Driver Powershell-Skript herunterladen.
+Den aktuellen Stand des Script Merge-XlfDocuments.ps1 gibt es [hier](https://github.com/KonnosPB/xlf-git-merge-driver/blob/main/src/Merge-XlfDocuments.ps1).
+
+### 2. Die Git-Konfigurationsdatei `.git/config` muss angepasst werden.
 
 ![Git-Config](./img/git_config.png)
 
@@ -110,7 +113,7 @@ Hier muss eine Konfigurationssektion `merge` hinzugefügt werden, die das Powers
 ``` Dockerfile
 [merge "xlf-merge-driver"]
 	name = A custom XLF merge driver written in powershell used to resolve conflicts of xlf translation files.
-	driver = powershell.exe -File '../xlf-git-merge-driver/src/Merge-XlfDocuments.ps1' %O %A %B %P
+	driver = powershell.exe -File '<path-to-Merge-XlfDocuments.ps1>' %O %A %B %P
 ```
 
 Einige Hinweise zu nicht offensichtlichen Inhalten:
@@ -121,7 +124,7 @@ Einige Hinweise zu nicht offensichtlichen Inhalten:
 
 Mehr Details zu `gitattributes` gibt es [hier](https://git-scm.com/docs/gitattributes)
 
-### 2. Der zweite Schritt ist die Erstellung einer `.gitattributes` Datei im Wurzelverzeichnis.
+### 3. Der dritte Schritt ist die Erstellung einer `.gitattributes` Datei im Wurzelverzeichnis.
 ![Git-AttributedConfig](./img/git_attributes.png)
 
 Es muss lediglich eine Zeile hinzugefügt werden, die angibt, dass der XLF Git-Merge-Driver für bestimmte Dateiendungen aktiviert werden soll.
