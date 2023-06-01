@@ -120,7 +120,7 @@ Einige Hinweise zu nicht offensichtlichen Inhalten:
 - `%O`= merge ancestor’s version  
 - `%A`= current version  (ours / yours)
 - `%B`= other branches' version (theirs)
-- `%P`= merge ancestor’s version
+- `%P`= file name
 
 Mehr Details zu `gitattributes` gibt es [hier](https://git-scm.com/docs/gitattributes)
 
