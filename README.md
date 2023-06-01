@@ -3,8 +3,8 @@
 XLF oder [XLIFF](https://en.wikipedia.org/wiki/XLIFF) ist ein XML-basiertes Dateiformat für Übersetzungen und wird unter anderem auch mit Dynamics 365 Business Central verwendet.
 Da ich häufiger vor dem Problem stand, große XLF-Dateien (ca. 30.000 Übersetzungen) zusammenzuführen, die von mehreren Personen parallel bearbeitet wurden, habe ich mich kurzerhand entschlossen, einen auf meine Bedürfnisse zugeschnittenen Git-Merge-Driver zu entwickeln. Der Treiber ist in Powershell geschrieben, da ich ihn ausschließlich im Microsoft-Umfeld einsetzen möchte.
 
-## Wieso einen Git-Merge-Driver?   
-Der Git Standard behandelt XLF-Dateien wie normale Textdateien, was zu unerwünschten Ergebnissen führt.
+## Wieso einen XLF Git-Merge-Driver?   
+Der Git-Standard behandelt XLF-Dateien wie normale Textdateien, was zu unerwünschten Ergebnissen führt.
 
 Ein einfaches Beispiel:   
 Jemand fügt eine Übersetzung durch ein Trans-Unit-Abschnitt hinzu und committed diese Änderung in seinem Git-Branch.
@@ -25,7 +25,7 @@ Jemand fügt eine Übersetzung durch ein Trans-Unit-Abschnitt hinzu und committe
 ```
 
 Zufälligerweise bearbeitet jemand anderes die Datei ebenfalls in einem anderen Git-Branch.   
-Wichtig hier: Die verwendete Id des `trans-unit` Elements ist eine andere (**ID2**).
+Wichtig hier: Die verwendete Id des Trans-Unit-Elements ist eine andere (**ID2**).
 ``` Xml
 <?xml version="1.0" encoding="utf-8"?>
 <xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 xliff-core-1.2-transitional.xsd">
@@ -43,7 +43,7 @@ Wichtig hier: Die verwendete Id des `trans-unit` Elements ist eine andere (**ID2
 ```
 
 Wenn man nun die Git-Branches zusammenführen möchte, wird Git einen Konflikt melden, da Git nur einen Textvergleich durchführt.   
-_In diesem Beispiel ist das kein Problem und relativ einfach manuell zu lösen. Bei sehr vielen Einträgen sieht das schon ganz anders aus._
+_In diesem sehr einfachen Beispiel ist das kein großes Problem und relativ einfach manuell zu lösen. Bei sehr vielen Einträgen sieht das schon anders aus._
 
 
 Der XLF Git-Merge-Driver hingegen würde in diesem Beispiel beide Änderungen nacheinander anordnen, ohne eine Kollision zu melden.   
@@ -92,11 +92,11 @@ Conflict at trans-unit 'ID1'.
 
 Enter (t)heirs, (o)urs or any other to (a)bort merging:
 ```
-Entscheidet sich der Benutzer nun für "theirs", gibt er "t" + "enter" ein.
+Entscheidet sich der Benutzer nun für "theirs", gibt er `t` + `enter` ein.
 
 Wenn es mehrere Konflikte gibt, werden diese nacheinander angezeigt. 
 
-Wird mit (a)bort abgebrochen, beendet sich das Powershell-Skript mit einem Exit-Code 1, der dann das Standard-Merge-Tool aktiviert. Natürlich gibt es auch die Möglichkeit, den Git-Merge-Vorgang abzubrechen, um sich die Dateien in Ruhe ansehen zu können.
+Wird mit (a)bort abgebrochen, beendet sich das Powershell-Skript mit einem Exit-Code 1, der wiederum den Standard-Merge-Mechanismus aktiviert. Es besteht die Möglichkeit, den Git-Merge-Vorgang abzubrechen, um die Dateien in Ruhe ansehen zu können.
 
 
 ## Installation
@@ -109,7 +109,7 @@ Hier muss eine Konfigurationssektion `merge` hinzugefügt werden, die das Powers
 
 ``` Dockerfile
 [merge "xlf-merge-driver"]
-	name = A custom merge driver written in powershell used to resolve conflicts of xlf translation files
+	name = A custom XLF merge driver written in powershell used to resolve conflicts of xlf translation files.
 	driver = powershell.exe -File '../xlf-git-merge-driver/src/Merge-XlfDocuments.ps1' %O %A %B %P
 ```
 
@@ -142,19 +142,19 @@ Einige Entwickler passen die XLF-Datei "manuell" an und verschieben dabei unbeab
 Beispiel für die Erhöhung der Einrückungstiefe von 2 auf 4. Die Anpassung muss in der Datei `.git/config` vorgenommen werden:
 ```
 [merge "xlf-merge-driver"]
-	name = A custom merge driver written in powershell used to resolve conflicts of xlf translation files
+	name = A custom XLF merge driver written in powershell used to resolve conflicts of xlf translation files.
 	driver = powershell.exe -File '../xlf-git-merge-driver/src/Merge-XlfDocuments.ps1' %O %A %B %P -XmlIndentation 4
 ```  
 
-## Gültigkeitsprüfung
+## Einfache Gültigkeitsprüfung der Trans-Unit-Abschnitte
 Gelegentlich kommt es vor, dass Entwickler Transunit-Abschnitte so ändern, dass zwar die XML-Struktur noch gültig ist, nicht aber das XLF-Dokument.
-Dies kann z.B. passieren, wenn ein Transunit Abschnitt dupliziert wurde und eine ID mehrfach vorkommt.   
+Dies kann z.B. passieren, wenn ein Transunit Abschnitt dupliziert wurde und eine Id mehrfach vorkommt. Klassischer Copy+Paste Fehler.   
 Mit dem Parameter `CheckDocument` können die zu mergenden XLF-Dokumente vorab validiert werden. Folgende Prüfmöglichkeiten stehen zur Verfügung. `Both`, `Theirs`, `Ours`, `NoCheck`, wobei `Both` voreingestellt ist.
 
-Beispiel, wenn keine Validierung des XLF-Transitabschnitts gewünscht wird. Die Anpassung muss in der Datei `.git/config` vorgenommen werden:
+Beispiel, wenn keine Validierung des Transit-Unit-Abschnitte gewünscht wird. Die Anpassung muss in der Datei `.git/config` vorgenommen werden:
 
 ```
 [merge "xlf-merge-driver"]
-	name = A custom merge driver written in powershell used to resolve conflicts of xlf translation files
+	name = A custom XLF merge driver written in powershell used to resolve conflicts of xlf translation files.
 	driver = powershell.exe -File '../xlf-git-merge-driver/src/Merge-XlfDocuments.ps1' %O %A %B %P -CheckDocument NoCheck
 ```  
