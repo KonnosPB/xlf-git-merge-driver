@@ -1,6 +1,6 @@
 <#PSScriptInfo
 
-.VERSION 0.3.1.0
+.VERSION 0.3.2.0
 
 .GUID e88958ff-827a-4529-900a-9b5b3303d190
 
@@ -357,9 +357,9 @@ function Confirm-Handling {
 
     [string] $newBaseXmlDisplay = Get-TransUnitPrettyPrint $XmlNewBaseTransUnitElement $NewBaseModificationType
     [string] $otherXmlDisplay = Get-TransUnitPrettyPrint $XmlOtherTransUnitElement $OtherModificationType
-    $completeUserMessage = "Conflict at trans-unit '$CurrentId'. $NewLineCharacters<<<<<<< ours:$FileName $OtherModificationType$NewLineCharacters$otherXmlDisplay$NewLineCharacters=======$NewLineCharacters$newBaseXmlDisplay$NewLineCharacters>>>>>>> theirs:$FileName $NewBaseModificationType$NewLineCharacters$($NewLineCharacters)Select`r`n(t)heirs`r`n(o)urs`r`n(at) always theirs`r`n(ao) always ours`r`n(c)ancel`r`n>"
+    $completeUserMessage = "Conflict at trans-unit '$CurrentId'. $NewLineCharacters<<<<<<< ours:$FileName $OtherModificationType$NewLineCharacters$otherXmlDisplay$NewLineCharacters=======$NewLineCharacters$newBaseXmlDisplay$NewLineCharacters>>>>>>> theirs:$FileName $NewBaseModificationType$NewLineCharacters$($NewLineCharacters)Select ... and press enter`r`n(t)heirs`r`n(o)urs`r`n(at) always theirs`r`n(ao) always ours`r`n(c)ancel`r`n>"
     if ($newDocumentBasedOnOurs) {
-        $completeUserMessage = "Conflict at trans-unit '$CurrentId'. $NewLineCharacters<<<<<<< ours:$FileName $NewBaseModificationType$NewLineCharacters$newBaseXmlDisplay$NewLineCharacters=======$NewLineCharacters$otherXmlDisplay$NewLineCharacters>>>>>>> theirs:$FileName $OtherModificationType$NewLineCharacters$($NewLineCharacters)Select`r`n(t)heirs`r`n(o)urs`r`n(at) always theirs`r`n(ao) always ours`r`n(c)ancel`r`n>"
+        $completeUserMessage = "Conflict at trans-unit '$CurrentId'. $NewLineCharacters<<<<<<< ours:$FileName $NewBaseModificationType$NewLineCharacters$newBaseXmlDisplay$NewLineCharacters=======$NewLineCharacters$otherXmlDisplay$NewLineCharacters>>>>>>> theirs:$FileName $OtherModificationType$NewLineCharacters$($NewLineCharacters)Select ... and press enter`r`n(t)heirs`r`n(o)urs`r`n(at) always theirs`r`n(ao) always ours`r`n(c)ancel`r`n>"
     }      
     
     Write-Host "Conflict handling mode $script:ConflictHandlingMode"
