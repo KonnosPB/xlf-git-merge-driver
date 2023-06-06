@@ -1,6 +1,6 @@
 <#PSScriptInfo
 
-.VERSION 0.3.2.0
+.VERSION 0.3.3.0
 
 .GUID e88958ff-827a-4529-900a-9b5b3303d190
 
@@ -88,18 +88,22 @@ param(
     [ValidateSet("Both", "Theirs", "Ours", "NoCheck")]
     [string] $CheckDocument = "Both"
 )
-$currVersion = '0.3.1.0'
+$currVersion = '0.3.3.0'
 $newDocumentBasedOnOurs = $false
 if ($NewDocumentBasedOn -eq 'Ours') {
     $newDocumentBasedOnOurs = $true
 }
 
 # Variables
+$newDocumentBasedOn = "Theirs"
+$otherFileBasedOn = "Ours"
 $newBaseFile = $TheirFile
 $otherFile = $OurFile
 if ($newDocumentBasedOnOurs) {
     $newBaseFile = $OurFile
     $otherFile = $TheirFile
+    $newDocumentBasedOn = "Ours"
+    $otherFileBasedOn = "Theirs"
 }
 $baseIdTransUnitHashtable = [ordered]@{}    # Mapping of Id and TransUnit XmlElement
 $otherIdTransUnitHashtable = [PSCustomObject]@{    # Collection of differences between other and base   
@@ -201,14 +205,24 @@ function CheckXlfDocument{
 function New-XlfDocument {
     param(
         [Parameter(Mandatory, Position = 0)]
-        [string] $Path
+        [string] $Path,
+        [Parameter(Mandatory, Position = 1)]
+        [ValidateSet("Theirs", "Ours", "Base")]
+        [string] $NewDocumentBasedOn
     )   
-    $content = Get-Content $Path -Raw -Encoding utf8    
-    $content = $content -replace "(`t|`r|`n)", ""
-    $content = $content -replace ">[\s`r`n]*<", "><"    
     [xml] $xlfDocument = [System.Xml.XmlDocument]::new()        
-    $xlfDocument.PreserveWhitespace = $false
-    $xlfDocument.LoadXml($content)    
+    try {
+        $content = Get-Content $Path -Raw -Encoding utf8    
+        $content = $content -replace "(`t|`r|`n)", ""
+        $content = $content -replace ">[\s`r`n]*<", "><"    
+    
+        $xlfDocument.PreserveWhitespace = $false
+        $xlfDocument.LoadXml($content)         
+    }
+    catch {
+        Write-Error "$NewDocumentBasedOn XLF Document is not a valid XML-File. Details`r`n$_"
+        exit(1) 
+    }    
     return $xlfDocument
 }
 
@@ -237,9 +251,12 @@ function New-IdTransUnitHashtableByXmlDocument {
 function New-IdTransUnitHashtableByXmlDocumentFromFile { 
     param(
         [Parameter(Mandatory, Position = 0)]
-        [string]$xlfPath
+        [string]$xlfPath,
+        [Parameter(Mandatory, Position = 1)]
+        [ValidateSet("Theirs", "Ours", "Base")]
+        [string] $NewDocumentBasedOn
     )      
-    [xml]$xXlfContent = New-XlfDocument $xlfPath
+    [xml]$xXlfContent = New-XlfDocument $xlfPath $NewDocumentBasedOn
     $idTransUnits = New-IdTransUnitHashtableByXmlDocument $xXlfContent
     return $idTransUnits
 }
@@ -680,10 +697,11 @@ try {
     if (@("Both", "Ours") -contains $CheckDocument){
         CheckXlfDocument -Path $OurFile -DocumentSource Our
     }    
-    $baseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $BaseFile
-    [xml]$xlfNewBaseDocument = New-XlfDocument $newBaseFile
+    $baseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $BaseFile Base
+
+    [xml]$xlfNewBaseDocument = New-XlfDocument $newBaseFile $newDocumentBasedOn
     $newBaseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocument $xlfNewBaseDocument
-    $otherIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $otherFile
+    $otherIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $otherFile $otherFileBasedOn
     $NewBaseDiffs = Get-Diffs $newBaseIdTransUnitHashtable
     $OtherDiffs = Get-Diffs $otherIdTransUnitHashtable
     $null = Merge-XlfDocument $xlfNewBaseDocument $NewBaseDiffs $OtherDiffs
