@@ -1,6 +1,6 @@
 <#PSScriptInfo
 
-.VERSION 0.3.3.0
+.VERSION 0.3.4.0
 
 .GUID e88958ff-827a-4529-900a-9b5b3303d190
 
@@ -88,13 +88,12 @@ param(
     [ValidateSet("Both", "Theirs", "Ours", "NoCheck")]
     [string] $CheckDocument = "Both"
 )
-$currVersion = '0.3.3.0'
+# Variables
+$currVersion = '0.3.4.0'
 $newDocumentBasedOnOurs = $false
 if ($NewDocumentBasedOn -eq 'Ours') {
     $newDocumentBasedOnOurs = $true
 }
-
-# Variables
 $newDocumentBasedOn = "Theirs"
 $otherFileBasedOn = "Ours"
 $newBaseFile = $TheirFile
@@ -116,91 +115,13 @@ $newBaseIdTransUnitHashtable = [PSCustomObject]@{    # Collection of differences
     ModifiedTransUnitIdMapping = [ordered]@{}
     RemovedTransUnitIdMapping  = [ordered]@{}
 }
-$conflictExitCode = 1
-    
+$conflictExitCode = 1    
 enum ConfictHandling {
     Abort
     Other
     NewBase
 }
 
-function CheckXlfDocument{
-    param(
-        [Parameter(Mandatory, Position = 0)]
-        [string] $Path,
-        [Parameter(Mandatory, Position = 1)]
-        [ValidateSet("Their", "Our")]
-        [string] $DocumentSource
-    )   
-    $errExitCode = 2
-    $content = Get-Content $Path -Raw -Encoding utf8    
-    #$content = $content -replace "(`t|`r|`n)", ""
-    #$content = $content -replace ">[\s`r`n]*<", "><"     
-    [xml] $xlfDocument = [System.Xml.XmlDocument]::new() 
-    try {
-        $xlfDocument.LoadXml($content)         
-    }
-    catch {
-        Write-Error "$DocumentSource document is not a valid xml"
-        exit($errExitCode)
-    }    
-
-    $xliffFile = $xlfDocument.xliff.file
-    $xmlElementsTransUnits = $xlfDocument.xliff.file.body.group.SelectNodes("*")
-    $listOfId = @()
-    $errorOccured = $false
-    $xmlElementsTransUnits | ForEach-Object {   
-        $xmlElementsTransUnit = $_ 
-        if (-not $xmlElementsTransUnit.id){
-            Write-Error "($DocumentSource document) trans-unit id attribute missing`r`n$($xmlElementsTransUnit.OuterXml)"
-            $errorOccured = $true            
-        } else{
-            if ([string]::IsNullOrWhiteSpace($xmlElementsTransUnit.id)){
-                Write-Error "($DocumentSource document) trans-unit id attribute value is empty`r`n$($xmlElementsTransUnit.OuterXml)"
-                $errorOccured = $true
-            } else {
-                if ($listOfId.Contains($xmlElementsTransUnit.id)){
-                    Write-Error "($DocumentSource document) trans-unit id '$($xmlElementsTransUnit.id)' used several times"
-                    $errorOccured = $true
-                }
-            }
-        }          
-
-        $listOfId += $xmlElementsTransUnit.id
-
-        if ($null -eq $xmlElementsTransUnit.source){
-            Write-Error "($DocumentSource document) <source> xml-tag missing in trans-unit element with id '$($xmlElementsTransUnit.id)'"
-            $errorOccured = $true
-        }
-
-        if ($xmlElementsTransUnit.source.Count -gt 1){
-            Write-Error "($DocumentSource document) <source> xml-tag used multiple times in trans-unit element with id '$($xmlElementsTransUnit.id)'"
-            $errorOccured = $true
-        }
-
-        
-        if ($xliffFile.Attributes["source-language"].Value -ne $xliffFile.Attributes["target-language"].Value)
-        {
-            if ($null -eq $xmlElementsTransUnit.target){
-                Write-Error "($DocumentSource document) <target> xml-tag missing in trans-unit element with id '$($xmlElementsTransUnit.id)'"
-                $errorOccured = $true
-            }
-            
-            if ($xmlElementsTransUnit.target.Count -gt 1){
-                Write-Error "($DocumentSource document) <target> xml-tag used multiple times in trans-unit element with id '$($xmlElementsTransUnit.id)'"
-                $errorOccured = $true
-            }
-            
-            if (-not ($xmlElementsTransUnit.target.state -In @('translated', 'new', 'needs-review-translation', 'final'))){
-                Write-Error "($DocumentSource document) target state attribute has not the value 'translated', 'new', 'needs-review-translation' or 'final' in trans-unit element with id '$($xmlElementsTransUnit.id)'"
-                $errorOccured = $true
-            }
-        }                   
-    }
-    if ($errorOccured){
-        exit($errExitCode)
-    }   
-}
 
 function New-XlfDocument {
     param(
@@ -208,7 +129,7 @@ function New-XlfDocument {
         [string] $Path,
         [Parameter(Mandatory, Position = 1)]
         [ValidateSet("Theirs", "Ours", "Base")]
-        [string] $NewDocumentBasedOn
+        [string] $CurrentDocumentSource
     )   
     [xml] $xlfDocument = [System.Xml.XmlDocument]::new()        
     try {
@@ -220,20 +141,91 @@ function New-XlfDocument {
         $xlfDocument.LoadXml($content)         
     }
     catch {
-        Write-Error "$NewDocumentBasedOn XLF Document is not a valid XML-File. Details`r`n$_"
+        Write-Error "$CurrentDocumentSource XLF Document is not a valid XML-File. Details`r`n$_"
         exit(1) 
     }    
     return $xlfDocument
 }
 
+
 function New-IdTransUnitHashtable {
     param(
         [Parameter(Mandatory, Position = 0)]
-        $xmlElementsTransUnits
+        [xml]$XlfDocument,
+        [Parameter(Mandatory, Position = 1)]
+        $XmlElementsTransUnits,
+        [Parameter(Mandatory, Position = 2)]
+        [ValidateSet("Theirs", "Ours", "Base")]
+        [string] $CurrentDocumentSource
     )   
+    
+    $errExitCode = 2
+    $xliffFile = $XlfDocument.xliff.file    
+    $errorOccured = $false   # Collect all messages and exit at the end if check fails.    
     $resultIdHashtable = [ordered]@{}
-    $xmlElementsTransUnits | ForEach-Object {
-        $resultIdHashtable.add($_.id, $_);
+    $XmlElementsTransUnits | ForEach-Object {
+        $xmlElementsTransUnit = $_
+        $skipThisTransUnit = $false
+        
+        if ($CheckDocument){                         
+            if (-not $xmlElementsTransUnit.id){
+                Write-Error "($CurrentDocumentSource document) trans-unit id attribute missing`r`n$($xmlElementsTransUnit.OuterXml)"
+                $skipThisTransUnit = $true
+                $errorOccured = $true
+            } else{
+                if ([string]::IsNullOrWhiteSpace($xmlElementsTransUnit.id)){
+                    Write-Error "($CurrentDocumentSource document) trans-unit id attribute value is empty`r`n$($xmlElementsTransUnit.OuterXml)"
+                    $skipThisTransUnit = $true
+                    $errorOccured = $true
+                } else {
+                    if ($resultIdHashtable.Contains($xmlElementsTransUnit.id)){
+                        Write-Error "($CurrentDocumentSource document) trans-unit id '$($xmlElementsTransUnit.id)' used several times"
+                        $skipThisTransUnit = $true
+                        $errorOccured = $true
+                    }
+                }
+            }          
+    
+            if ($null -eq $xmlElementsTransUnit.source){
+                Write-Error "($CurrentDocumentSource document) <source> xml-tag missing in trans-unit element with id '$($xmlElementsTransUnit.id)'"
+                $skipThisTransUnit = $true
+                $errorOccured = $true
+            }
+    
+            if ($xmlElementsTransUnit.source.Count -gt 1){
+                Write-Error "($CurrentDocumentSource document) <source> xml-tag used multiple times in trans-unit element with id '$($xmlElementsTransUnit.id)'"
+                $skipThisTransUnit = $true
+                $errorOccured = $true
+            }
+                
+            if ($xliffFile.Attributes["source-language"].Value -ne $xliffFile.Attributes["target-language"].Value)
+            {
+                if ($null -eq $xmlElementsTransUnit.target){
+                    Write-Error "($CurrentDocumentSource document) <target> xml-tag missing in trans-unit element with id '$($xmlElementsTransUnit.id)'"
+                    $skipThisTransUnit = $true
+                    $errorOccured = $true
+                }
+                
+                if ($xmlElementsTransUnit.target.Count -gt 1){
+                    Write-Error "($CurrentDocumentSource document) <target> xml-tag used multiple times in trans-unit element with id '$($xmlElementsTransUnit.id)'"
+                    $skipThisTransUnit = $true
+                    $errorOccured = $true
+                }
+                
+                if (-not ($xmlElementsTransUnit.target.state -In @('translated', 'new', 'needs-review-translation', 'final'))){
+                    Write-Error "($CurrentDocumentSource document) target state attribute has not the value 'translated', 'new', 'needs-review-translation' or 'final' in trans-unit element with id '$($xmlElementsTransUnit.id)'"
+                    $skipThisTransUnit = $true
+                    $errorOccured = $true
+                }
+            }                   
+        } # if ($CheckDocument){   
+
+        if (-not $skipThisTransUnit){
+            $resultIdHashtable.add($xmlElementsTransUnit.id, $xmlElementsTransUnit);
+        }
+    }
+    if ($errorOccured){
+        exit($errExitCode)     
     }
     return $resultIdHashtable
 }
@@ -241,23 +233,26 @@ function New-IdTransUnitHashtable {
 function New-IdTransUnitHashtableByXmlDocument { 
     param(
         [Parameter(Mandatory, Position = 0)]
-        [xml]$xlfDocument
+        [xml]$XlfDocument,
+        [Parameter(Mandatory, Position = 1)]
+        [ValidateSet("Theirs", "Ours", "Base")]
+        [string] $CurrentDocumentSource
     )   
-    $xmlElementsTransUnits = $xlfDocument.xliff.file.body.group.SelectNodes("*")
-    $idTransUnits = New-IdTransUnitHashtable $xmlElementsTransUnits
+    $xmlElementsTransUnits = $XlfDocument.xliff.file.body.group.SelectNodes("*")
+    $idTransUnits = New-IdTransUnitHashtable $XlfDocument $xmlElementsTransUnits $CurrentDocumentSource
     return $idTransUnits
 }
 
 function New-IdTransUnitHashtableByXmlDocumentFromFile { 
     param(
         [Parameter(Mandatory, Position = 0)]
-        [string]$xlfPath,
+        [string]$Path,
         [Parameter(Mandatory, Position = 1)]
         [ValidateSet("Theirs", "Ours", "Base")]
-        [string] $NewDocumentBasedOn
+        [string] $CurrentDocumentSource
     )      
-    [xml]$xXlfContent = New-XlfDocument $xlfPath $NewDocumentBasedOn
-    $idTransUnits = New-IdTransUnitHashtableByXmlDocument $xXlfContent
+    [xml]$xlfDocument = New-XlfDocument $Path $CurrentDocumentSource
+    $idTransUnits = New-IdTransUnitHashtableByXmlDocument $xlfDocument $CurrentDocumentSource
     return $idTransUnits
 }
 
@@ -311,7 +306,7 @@ function Get-TransUnitPrettyPrint {
         $XmlTransUnitElement,
         [Parameter(Mandatory, Position = 1)]
         [ValidateSet('added', 'modified', 'removed')]
-        [string] $modificationType
+        [string] $ModificationType
     )
 
     $stringWriter = [System.IO.StringWriter]::new()
@@ -331,10 +326,10 @@ function Get-TransUnitPrettyPrint {
     $xmlDisplay = ''
     $outerXml = $out.Split("`n")
     $linePrefix = "+"
-    if ($modificationType -eq 'modified') {
+    if ($ModificationType -eq 'modified') {
         $linePrefix = "~"
     }
-    elseif ($modificationType -eq 'removed') {
+    elseif ($ModificationType -eq 'removed') {
         $linePrefix = "-"
     }
     for ($i = 0; $i -lt $outerXml.Count; $i++) {
@@ -423,45 +418,45 @@ function Confirm-Handling {
 function Add-TransUnitAtEnd {
     param(
         [Parameter(Mandatory, Position = 0)]
-        [xml] $xlfDocument,
+        [xml] $XlfDocument,
         [Parameter(Mandatory, Position = 1)]
-        $xmlTransUnitToAddElement
+        $XmlTransUnitToAddElement
     )    
-    [System.Xml.XmlElement]$group = $xlfDocument.GetElementsByTagName("group") | Select-Object -First 1
-    $xmlImportedTransUnitToAddElement = $xlfDocument.ImportNode($xmlTransUnitToAddElement, $true <#deep#>)
-    $xmlTransUnitToAddElement = $xmlImportedTransUnitToAddElement
-    $null = $group.AppendChild($xmlTransUnitToAddElement)
+    [System.Xml.XmlElement]$group = $XlfDocument.GetElementsByTagName("group") | Select-Object -First 1
+    $xmlImportedTransUnitToAddElement = $XlfDocument.ImportNode($xmlTransUnitToAddElement, $true <#deep#>)
+    $XmlTransUnitToAddElement = $xmlImportedTransUnitToAddElement
+    $null = $group.AppendChild($XmlTransUnitToAddElement)
 }
 
 function Invoke-ReplaceTransUnit {
     param(
         [Parameter(Mandatory, Position = 0)]
-        [xml] $xlfNewBaseDocument,
+        [xml] $XlfNewBaseDocument,
         [Parameter(Position = 1)]
-        $xmlTransUnitElementToReplace,
+        $XmlTransUnitElementToReplace,
         [Parameter(Mandatory, Position = 2)]
-        $xmlTransUnitElementReplacement
+        $XmlTransUnitElementReplacement
     )        
-    [System.Xml.XmlElement]$group = $xlfNewBaseDocument.GetElementsByTagName("group") | Select-Object -First 1
-    $xmlTransUnitElementReplacementImported = $xlfNewBaseDocument.ImportNode($xmlTransUnitElementReplacement, $true <#deep#>)
-    if (-not $xmlTransUnitElementToReplace) {
-        $xmlTransUnitElementToReplace = $newBaseIdTransUnitHashtable[$xmlTransUnitElementReplacement.id]
-        if (-not $xmlTransUnitElementToReplace) {
+    [System.Xml.XmlElement]$group = $XlfNewBaseDocument.GetElementsByTagName("group") | Select-Object -First 1
+    $xmlTransUnitElementReplacementImported = $XlfNewBaseDocument.ImportNode($XmlTransUnitElementReplacement, $true <#deep#>)
+    if (-not $XmlTransUnitElementToReplace) {
+        $XmlTransUnitElementToReplace = $newBaseIdTransUnitHashtable[$XmlTransUnitElementReplacement.id]
+        if (-not $XmlTransUnitElementToReplace) {
             return
         }
     }
-    $null = $group.ReplaceChild($xmlTransUnitElementReplacementImported, $xmlTransUnitElementToReplace)
+    $null = $group.ReplaceChild($xmlTransUnitElementReplacementImported, $XmlTransUnitElementToReplace)
 }
 
 function Remove-TransUnit {
     param(
         [Parameter(Mandatory, Position = 0)]
-        [xml] $xlfNewBaseDocument,
+        [xml] $XlfNewBaseDocument,
         [Parameter(Mandatory, Position = 1)]
-        $xmlTransUnitToRemoveElement
+        $XmlTransUnitToRemoveElement
     )   
-    [System.Xml.XmlElement]$group = $xlfNewBaseDocument.GetElementsByTagName("group") | Select-Object -First 1
-    $currentId = $xmlTransUnitToRemoveElement.Id
+    [System.Xml.XmlElement]$group = $XlfNewBaseDocument.GetElementsByTagName("group") | Select-Object -First 1
+    $currentId = $XmlTransUnitToRemoveElement.Id
     if (-not $currentId) {
         return
     }
@@ -475,21 +470,21 @@ function Remove-TransUnit {
 function Merge-XlfDocument {
     param(
         [Parameter(Mandatory, Position = 0)]
-        [xml]$xlfNewBaseDocument,
+        [xml]$XlfNewBaseDocument,
         [Parameter(Mandatory, Position = 1)]
-        $newBaseDiffsHashtables,
+        $NewBaseDiffsHashtables,
         [Parameter(Mandatory, Position = 2)]
-        $otherDiffsHashtables
+        $OtherDiffsHashtables
     )
 
     #region Cases when other is added
-    $otherDiffsHashtables.AddedHashTable.GetEnumerator() | ForEach-Object {
+    $OtherDiffsHashtables.AddedHashTable.GetEnumerator() | ForEach-Object {
         $currentId = $_.Name
         $xOtherElement = $_.Value
         $isHandled = $false
 
         # Is newBase and other added?
-        $xNewBaseElement = $newBaseDiffsHashtables.AddedHashTable[$currentId]
+        $xNewBaseElement = $NewBaseDiffsHashtables.AddedHashTable[$currentId]
         if ($xNewBaseElement) {            
             if ($xNewBaseElement.OuterXml.GetHashCode() -ne $xOtherElement.OuterXml.GetHashCode()) {                                                  
                 $isHandled = $true
@@ -498,7 +493,7 @@ function Merge-XlfDocument {
                     exit($conflictExitCode)
                 }
                 elseif ([ConfictHandling]::Other -eq $userDecision) {
-                    Invoke-ReplaceTransUnit $xlfNewBaseDocument $xNewBaseElement $xOtherElement                               
+                    Invoke-ReplaceTransUnit $XlfNewBaseDocument $xNewBaseElement $xOtherElement                               
                 }
                 elseif ([ConfictHandling]::NewBase -eq $userDecision) {
                     # Nothing to do. leave other as it is                    
@@ -507,7 +502,7 @@ function Merge-XlfDocument {
         }
 
         # Is other added and newBase modified?
-        $xNewBaseElement = $newBaseDiffsHashtables.ModifiedHashTable[$currentId]
+        $xNewBaseElement = $NewBaseDiffsHashtables.ModifiedHashTable[$currentId]
         if ($xNewBaseElement) {                        
             if ($xNewBaseElement.OuterXml.GetHashCode() -ne $xOtherElement.OuterXml.GetHashCode()) {                                                  
                 $isHandled = $true
@@ -516,7 +511,7 @@ function Merge-XlfDocument {
                     exit($conflictExitCode)
                 }
                 elseif ([ConfictHandling]::Other -eq $userDecision) {
-                    Invoke-ReplaceTransUnit $xlfNewBaseDocument $xNewBaseElement $xOtherElement                                 
+                    Invoke-ReplaceTransUnit $XlfNewBaseDocument $xNewBaseElement $xOtherElement                                 
                 }
                 elseif ([ConfictHandling]::NewBase -eq $userDecision) {
                     # Nothing to do. leave other as it is                    
@@ -525,7 +520,7 @@ function Merge-XlfDocument {
         }
 
         # Is other added and newBase removed?
-        $xNewBaseElement = $newBaseDiffsHashtables.RemovedHashTable[$currentId]
+        $xNewBaseElement = $NewBaseDiffsHashtables.RemovedHashTable[$currentId]
         if ($xNewBaseElement) {     
             $isHandled = $true                              
             $userDecision = Confirm-Handling $currentId $xNewBaseElement 'removed' $xOtherElement 'added'
@@ -533,7 +528,7 @@ function Merge-XlfDocument {
                 exit($conflictExitCode)
             }
             elseif ([ConfictHandling]::Other -eq $userDecision) {
-                Add-TransUnitAtEnd $xlfNewBaseDocument $xOtherElement                                
+                Add-TransUnitAtEnd $XlfNewBaseDocument $xOtherElement                                
             }
             elseif ([ConfictHandling]::NewBase -eq $userDecision) {
                 # Nothing to do. leave remote as it is                
@@ -541,19 +536,19 @@ function Merge-XlfDocument {
         }     
         
         if (-not $isHandled) {
-            Add-TransUnitAtEnd $xlfNewBaseDocument $xOtherElement    
+            Add-TransUnitAtEnd $XlfNewBaseDocument $xOtherElement    
         }
     } 
     #endregion Cases when other is added    
     
     #region Cases when other is modified
-    $otherDiffsHashtables.ModifiedHashTable.GetEnumerator() | ForEach-Object {
+    $OtherDiffsHashtables.ModifiedHashTable.GetEnumerator() | ForEach-Object {
         $currentId = $_.Name
         $xOtherElement = $_.Value
         $isHandled = $false
 
         # Is newBase added and other modified?
-        $xNewBaseElement = $newBaseDiffsHashtables.AddedHashTable[$currentId]
+        $xNewBaseElement = $NewBaseDiffsHashtables.AddedHashTable[$currentId]
         if ($xNewBaseElement) {            
             if ($xNewBaseElement.OuterXml.GetHashCode() -ne $xOtherElement.OuterXml.GetHashCode()) {                                                  
                 $isHandled = $true
@@ -562,7 +557,7 @@ function Merge-XlfDocument {
                     exit($conflictExitCode)
                 }
                 elseif ([ConfictHandling]::Other -eq $userDecision) {
-                    Invoke-ReplaceTransUnit $xlfNewBaseDocument $xNewBaseElement $xOtherElement                               
+                    Invoke-ReplaceTransUnit $XlfNewBaseDocument $xNewBaseElement $xOtherElement                               
                 }
                 elseif ([ConfictHandling]::NewBase -eq $userDecision) {
                     # Nothing to do. leave other as it is                    
@@ -571,7 +566,7 @@ function Merge-XlfDocument {
         }
 
         # Is other and newBase modified?
-        $xNewBaseElement = $newBaseDiffsHashtables.ModifiedHashTable[$currentId]
+        $xNewBaseElement = $NewBaseDiffsHashtables.ModifiedHashTable[$currentId]
         if ($xNewBaseElement) {            
             if ($xNewBaseElement.OuterXml.GetHashCode() -ne $xOtherElement.OuterXml.GetHashCode()) {                                                  
                 $isHandled = $true
@@ -580,7 +575,7 @@ function Merge-XlfDocument {
                     exit($conflictExitCode)
                 }
                 elseif ([ConfictHandling]::Other -eq $userDecision) {
-                    Invoke-ReplaceTransUnit $xlfNewBaseDocument $xNewBaseElement $xOtherElement                               
+                    Invoke-ReplaceTransUnit $XlfNewBaseDocument $xNewBaseElement $xOtherElement                               
                 }
                 elseif ([ConfictHandling]::NewBase -eq $userDecision) {
                     # Nothing to do. leave other as it is                    
@@ -589,7 +584,7 @@ function Merge-XlfDocument {
         }
 
         # Is other modified and newBase removed?
-        $xNewBaseElement = $newBaseDiffsHashtables.RemovedHashTable[$currentId]
+        $xNewBaseElement = $NewBaseDiffsHashtables.RemovedHashTable[$currentId]
         if ($xNewBaseElement) {                             
             $isHandled = $true
             $userDecision = Confirm-Handling $currentId $xNewBaseElement 'removed' $xOtherElement 'modified'
@@ -597,8 +592,8 @@ function Merge-XlfDocument {
                 exit($conflictExitCode)
             }
             elseif ([ConfictHandling]::Other -eq $userDecision) {
-                #Remove-TransUnit $xlfNewBaseDocument $xNewBaseElement
-                Add-TransUnitAtEnd $xlfNewBaseDocument $xOtherElement                               
+                #Remove-TransUnit $XlfNewBaseDocument $xNewBaseElement
+                Add-TransUnitAtEnd $XlfNewBaseDocument $xOtherElement                               
             }
             elseif ([ConfictHandling]::NewBase -eq $userDecision) {
                 # Nothing to do. leave remote as it is                
@@ -606,13 +601,13 @@ function Merge-XlfDocument {
         } 
         
         if (-not $isHandled) {
-            Invoke-ReplaceTransUnit $xlfNewBaseDocument $xNewBaseElement $xOtherElement
+            Invoke-ReplaceTransUnit $XlfNewBaseDocument $xNewBaseElement $xOtherElement
         }
     }
     #endregion Cases when other is modified
 
     #region Cases when other is removed
-    $otherDiffsHashtables.RemovedHashTable.GetEnumerator() | ForEach-Object {
+    $OtherDiffsHashtables.RemovedHashTable.GetEnumerator() | ForEach-Object {
         $currentId = $_.Name
         $xOtherElement = $_.Value
         $isHandled = $false
@@ -659,7 +654,7 @@ function Merge-XlfDocument {
 function Get-XmlPrettyPrint {
     param(
         [Parameter(Mandatory, Position = 0)]
-        [xml] $xlfDocument
+        [xml] $XlfDocument
     )         
     $stringWriter = [System.IO.StringWriter]::new()
     $xmlSettings = [System.Xml.XmlWriterSettings]::new()    
@@ -669,7 +664,7 @@ function Get-XmlPrettyPrint {
     }
     $xmlSettings.NewLineChars = $NewLineCharacters
     $xmlWriter = [System.Xml.XmlWriter]::Create($stringWriter, $xmlSettings)   
-    $xlfDocument.WriteContentTo($xmlWriter) 
+    $XlfDocument.WriteContentTo($xmlWriter) 
     $XmlWriter.Flush()
     $stringWriter.Flush()     
     $out = $stringWriter.ToString()   
@@ -679,28 +674,22 @@ function Get-XmlPrettyPrint {
 function Write-Xml {
     param(
         [Parameter(Mandatory, Position = 0)]
-        [xml] $xlfDocument,
+        [xml] $XlfDocument,
         [Parameter(Mandatory, Position = 1)]
-        [string] $path
+        [string] $Path
     )
-    $xmlString = Get-XmlPrettyPrint $xlfDocument
-    Set-Content -Pass $path -Value $xmlString -Encoding utf8 | Out-Null
+    $xmlString = Get-XmlPrettyPrint $XlfDocument
+    Set-Content -Pass $Path -Value $xmlString -Encoding utf8 | Out-Null
 }
 
 Write-Host "Merging $FileName with xlf-merger-driver $currVersion"
 
 try {
-    
-    if (@("Both", "Theirs") -contains $CheckDocument){
-        CheckXlfDocument -Path $TheirFile -DocumentSource Their
-    }
-    if (@("Both", "Ours") -contains $CheckDocument){
-        CheckXlfDocument -Path $OurFile -DocumentSource Our
-    }    
+       
     $baseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $BaseFile Base
 
     [xml]$xlfNewBaseDocument = New-XlfDocument $newBaseFile $newDocumentBasedOn
-    $newBaseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocument $xlfNewBaseDocument
+    $newBaseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocument $xlfNewBaseDocument $newDocumentBasedOn
     $otherIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $otherFile $otherFileBasedOn
     $NewBaseDiffs = Get-Diffs $newBaseIdTransUnitHashtable
     $OtherDiffs = Get-Diffs $otherIdTransUnitHashtable
