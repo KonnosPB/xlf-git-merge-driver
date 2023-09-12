@@ -33,6 +33,47 @@ Describe "Real world bugs test" {
             $LASTEXITCODE | Should -Be 2            
         }     
     }
+
+    Context "Whitespaces removed" {
+        It "should not remove whites spaces" { 
+            $MergeXlfDocumentsScript = Join-Path (Split-Path -parent $PSScriptRoot) "\src\Merge-XlfDocuments.ps1"
+
+            function Get-TestResourcePath($fileName) {
+                $testResourcePath = Join-Path (Split-Path -parent $PSScriptRoot) "\test\Resources\$fileName"
+                return $testResourcePath
+            }
+
+            function Get-TransUnitElements($path) {
+                [xml]$xlfDocument = Get-Content $path -Raw -Encoding utf8
+                $xmlElementsTransUnits = $xlfDocument.xliff.file.body.group.SelectNodes("*")
+                return $xmlElementsTransUnits
+            }       
+            $folderPath = 'Check-Xliff-WhitespaceHandling'
+           
+            Remove-Item -Path (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.MERGED.testresult")) -ErrorAction SilentlyContinue
+            &$MergeXlfDocumentsScript `
+                -BaseFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.BASE.test")) `
+                -OurFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.LOCAL.test")) `
+                -TheirFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.REMOTE.test")) `
+                -ConflictHandlingMode UseAlwaysTheirs `
+                -NewDocumentBasedOn Theirs
+
+                $xmlElementsTransUnits = Get-TransUnitElements (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.MERGED.testresult"))
+                $xmlElementsTransUnits.Count | Should -Be 4                
+                $xmlElementsTransUnits[0].id | Should -BeExactly "ID1Remote"	
+                $xmlElementsTransUnits[0].source.InnerText | Should -BeExactly "  "
+                $xmlElementsTransUnits[0].target.InnerText | Should -BeExactly "  "
+                $xmlElementsTransUnits[1].id | Should -BeExactly "ID2Remote"	
+                $xmlElementsTransUnits[1].source.InnerText | Should -BeExactly "    "
+                $xmlElementsTransUnits[1].target.InnerText | Should -BeExactly "    "                                          
+                $xmlElementsTransUnits[3].id | Should -BeExactly "ID2Local"	
+                $xmlElementsTransUnits[3].source.InnerText | Should -BeExactly " "
+                $xmlElementsTransUnits[3].target.InnerText | Should -BeExactly " "                
+                $xmlElementsTransUnits[2].id | Should -BeExactly "ID1Local"	
+                #$xmlElementsTransUnits[2].source.InnerText | Should -BeExactly ""
+                $xmlElementsTransUnits[2].target.InnerText | Should -BeExactly ""
+        }     
+    }
 }
 
 Describe "Interactive test" {

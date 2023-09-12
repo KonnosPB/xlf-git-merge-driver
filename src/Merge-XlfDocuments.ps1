@@ -1,6 +1,6 @@
 <#PSScriptInfo
 
-.VERSION 0.3.4.0
+.VERSION 0.3.5.0
 
 .GUID e88958ff-827a-4529-900a-9b5b3303d190
 
@@ -86,10 +86,12 @@ param(
     [int] $XmlIndentation = 2,
     [Parameter()]    
     [ValidateSet("Both", "Theirs", "Ours", "NoCheck")]
-    [string] $CheckDocument = "Both"
+    [string] $CheckDocument = "Both",
+    [Parameter()]        
+    [Switch] $AllowClosingTags
 )
 # Variables
-$currVersion = '0.3.4.0'
+$currVersion = '0.3.5.0'
 $newDocumentBasedOnOurs = $false
 if ($NewDocumentBasedOn -eq 'Ours') {
     $newDocumentBasedOnOurs = $true
@@ -134,10 +136,10 @@ function New-XlfDocument {
     [xml] $xlfDocument = [System.Xml.XmlDocument]::new()        
     try {
         $content = Get-Content $Path -Raw -Encoding utf8    
-        $content = $content -replace "(`t|`r|`n)", ""
-        $content = $content -replace ">[\s`r`n]*<", "><"    
+        # $content = $content -replace "(`t|`r|`n)", ""
+        # $content = $content -replace ">[\s`r`n]*<", "><"    
     
-        $xlfDocument.PreserveWhitespace = $false
+        $xlfDocument.PreserveWhitespace = $true
         $xlfDocument.LoadXml($content)         
     }
     catch {
@@ -651,6 +653,24 @@ function Merge-XlfDocument {
     #endregion Cases when other is removed    
 }
 
+function Remove-CloseTag{
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string] $content
+    )   
+    $result = $out -replace "<source />", "<source></source>"     
+    $result = $result -replace "<target />", "<target></target>"     
+    $targetMatches = [regex]::Matches($result, '< *target *(?<target_attributes>[^\/>]*)\/>')
+    foreach($targetMatch in $targetMatches) {
+        if ($targetMatch.Success){            
+            $targetAttributes = $targetMatch.Groups['target_attributes'].Value;
+            $result = $result.Replace($targetMatch.Value, "<target $($targetAttributes.Trim())></target>")
+        }
+    }
+    return $result
+}
+
+
 function Get-XmlPrettyPrint {
     param(
         [Parameter(Mandatory, Position = 0)]
@@ -660,16 +680,20 @@ function Get-XmlPrettyPrint {
     $xmlSettings = [System.Xml.XmlWriterSettings]::new()    
     if ($XmlIndentation -gt 0) {
         $xmlSettings.Indent = $true
-        $xmlSettings.IndentChars = "".PadLeft($XmlIndentation, " ")
+        $xmlSettings.IndentChars = "".PadLeft($XmlIndentation, " ")        
     }
-    $xmlSettings.NewLineChars = $NewLineCharacters
-    $xmlWriter = [System.Xml.XmlWriter]::Create($stringWriter, $xmlSettings)   
+    $xmlSettings.NewLineChars = $NewLineCharacters    
+    $xmlWriter = [System.Xml.XmlWriter]::Create($stringWriter, $xmlSettings)  
     $XlfDocument.WriteContentTo($xmlWriter) 
     $XmlWriter.Flush()
     $stringWriter.Flush()     
-    $out = $stringWriter.ToString()   
+    $out = $stringWriter.ToString()  
+    if (-not $AllowClosingTags.IsPresent){         
+        $out = Remove-CloseTag $out
+    }
     return $out
 }
+
 
 function Write-Xml {
     param(
@@ -684,10 +708,8 @@ function Write-Xml {
 
 Write-Host "Merging $FileName with xlf-merger-driver $currVersion"
 
-try {
-       
+try {       
     $baseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $BaseFile Base
-
     [xml]$xlfNewBaseDocument = New-XlfDocument $newBaseFile $newDocumentBasedOn
     $newBaseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocument $xlfNewBaseDocument $newDocumentBasedOn
     $otherIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $otherFile $otherFileBasedOn
