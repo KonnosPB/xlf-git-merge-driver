@@ -1,6 +1,6 @@
 <#PSScriptInfo
 
-.VERSION 0.3.5.0
+.VERSION 0.3.6.0
 
 .GUID e88958ff-827a-4529-900a-9b5b3303d190
 
@@ -91,7 +91,7 @@ param(
     [Switch] $AllowClosingTags
 )
 # Variables
-$currVersion = '0.3.5.0'
+$currVersion = '0.3.6.0'
 $newDocumentBasedOnOurs = $false
 if ($NewDocumentBasedOn -eq 'Ours') {
     $newDocumentBasedOnOurs = $true
@@ -123,7 +123,6 @@ enum ConfictHandling {
     Other
     NewBase
 }
-
 
 function New-XlfDocument {
     param(
@@ -350,6 +349,44 @@ function Get-TransUnitPrettyPrint {
     return $xmlDisplay
 }
 
+function Test-CanAutomerged{
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string] $CurrentId,
+        [Parameter(Mandatory, Position = 1)]
+        $XmlNewBaseTransUnitElement,
+        [Parameter(Mandatory, Position = 2)]
+        [ValidateSet('added', 'modified', 'removed')]
+        [string]$NewBaseModificationType,
+        [Parameter(Mandatory, Position = 3)]
+        $XmlOtherTransUnitElement,
+        [Parameter(Mandatory, Position = 4)]
+        [ValidateSet('added', 'modified', 'removed')]
+        [string]$OtherModificationType
+    )   
+
+    if(($XmlNewBaseTransUnitElement.source.InnerText -match " +") -and 
+       ($XmlNewBaseTransUnitElement.target.InnerText -match " +") -and 
+       ($XmlNewBaseTransUnitElement.target.state -eq "translated") -and 
+       ($XmlOtherTransUnitElement.source.InnerText -match " +") -and 
+       ($XmlOtherTransUnitElement.target.InnerText -match " *") -and 
+       ($XmlOtherTransUnitElement.target.state -eq "needs-review-translation")
+      ){
+        return [ConfictHandling]::NewBase
+    }
+
+    if(($XmlOtherTransUnitElement.source.InnerText -match " +") -and 
+       ($XmlOtherTransUnitElement.target.InnerText -match " +") -and 
+       ($XmlOtherTransUnitElement.target.state -eq "translated") -and 
+       ($XmlNewBaseTransUnitElement.source.InnerText -match " +") -and 
+       ($XmlNewBaseTransUnitElement.target.InnerText -match " *") -and 
+       ($XmlNewBaseTransUnitElement.target.state -eq "needs-review-translation")
+      ){
+        return [ConfictHandling]::Other
+    }
+    return [ConfictHandling]::Abort
+}
+
 function Confirm-Handling {
     param(
         [Parameter(Mandatory, Position = 0)]
@@ -368,6 +405,11 @@ function Confirm-Handling {
     if ($script:ConflictHandlingMode -eq 'Abort') {
         return [ConfictHandling]::Abort
     }
+
+    $handlingAutomerge = Test-CanAutomerged $CurrentId $XmlNewBaseTransUnitElement $NewBaseModificationType $XmlOtherTransUnitElement $OtherModificationType
+    if ($handlingAutomerge -ne [ConfictHandling]::Abort){
+        return  $handlingAutomerge
+    }    
 
     [string] $newBaseXmlDisplay = Get-TransUnitPrettyPrint $XmlNewBaseTransUnitElement $NewBaseModificationType
     [string] $otherXmlDisplay = Get-TransUnitPrettyPrint $XmlOtherTransUnitElement $OtherModificationType
