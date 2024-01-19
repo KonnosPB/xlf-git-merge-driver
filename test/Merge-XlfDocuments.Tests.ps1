@@ -11,7 +11,93 @@ Describe "Theirs what? | Ours what?" {
 }
 #>
 
+Describe "Automerge test" {
+    Context "Simple whitespace merge " {
+        It "should be merged automatically when own is translated and other is needs-review-translation" { 
+            $MergeXlfDocumentsScript = Join-Path (Split-Path -parent $PSScriptRoot) "\src\Merge-XlfDocuments.ps1"
+
+            function Get-TestResourcePath($fileName) {
+                $testResourcePath = Join-Path (Split-Path -parent $PSScriptRoot) "\test\Resources\$fileName"
+                return $testResourcePath
+            }
+            function Get-TransUnitElements($path) {
+                [xml]$xlfDocument = Get-Content $path -Raw -Encoding utf8
+                $xmlElementsTransUnits = $xlfDocument.xliff.file.body.group.SelectNodes("*")
+                return $xmlElementsTransUnits
+            }           
+            $folderPath = 'Check-Xliff-Automerge-Whitespace'
+           
+            Remove-Item -Path (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.MERGED.testresult")) -ErrorAction SilentlyContinue
+            &$MergeXlfDocumentsScript `
+                -BaseFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.BASE.test")) `
+                -OurFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.LOCAL.test")) `
+                -TheirFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.REMOTE.test")) `
+                -NewDocumentBasedOn Theirs
+
+                $xmlElementsTransUnits = Get-TransUnitElements (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.MERGED.testresult"))                
+                $xmlElementsTransUnits[4].id | Should -BeExactly "ID5"	
+                $xmlElementsTransUnits[4].target.InnerText | Should -BeExactly "  "  
+                $xmlElementsTransUnits[4].target.state | Should -BeExactly "translated"  
+                $xmlElementsTransUnits[5].id | Should -BeExactly "ID6"	
+                $xmlElementsTransUnits[5].target.InnerText | Should -BeExactly " "        
+                $xmlElementsTransUnits[5].target.state | Should -BeExactly "translated"    
+        }     
+
+        It "should be merged automatically when own is needs-review-translation and other is translated" { 
+            $MergeXlfDocumentsScript = Join-Path (Split-Path -parent $PSScriptRoot) "\src\Merge-XlfDocuments.ps1"
+
+            function Get-TestResourcePath($fileName) {
+                $testResourcePath = Join-Path (Split-Path -parent $PSScriptRoot) "\test\Resources\$fileName"
+                return $testResourcePath
+            }
+            function Get-TransUnitElements($path) {
+                [xml]$xlfDocument = Get-Content $path -Raw -Encoding utf8
+                $xmlElementsTransUnits = $xlfDocument.xliff.file.body.group.SelectNodes("*")
+                return $xmlElementsTransUnits
+            }           
+            $folderPath = 'Check-Xliff-Automerge-Whitespace-Reverse'
+           
+            Remove-Item -Path (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.MERGED.testresult")) -ErrorAction SilentlyContinue
+            &$MergeXlfDocumentsScript `
+                -BaseFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.BASE.test")) `
+                -OurFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.LOCAL.test")) `
+                -TheirFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.REMOTE.test")) `
+                -NewDocumentBasedOn Theirs
+
+                $xmlElementsTransUnits = Get-TransUnitElements (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.MERGED.testresult"))                
+                $xmlElementsTransUnits[4].id | Should -BeExactly "ID5"	
+                $xmlElementsTransUnits[4].target.InnerText | Should -BeExactly "  "  
+                $xmlElementsTransUnits[4].target.state | Should -BeExactly "translated"  
+                $xmlElementsTransUnits[5].id | Should -BeExactly "ID6"	
+                $xmlElementsTransUnits[5].target.InnerText | Should -BeExactly " "        
+                $xmlElementsTransUnits[5].target.state | Should -BeExactly "translated"    
+        }     
+    }
+}
+
 Describe "Real world bugs test" {
+    Context "Merge with conflict and blank line with diff color change" {
+        It "should run without sucessfull without exceptions" { 
+            $MergeXlfDocumentsScript = Join-Path (Split-Path -parent $PSScriptRoot) "\src\Merge-XlfDocuments.ps1"
+
+            function Get-TestResourcePath($fileName) {
+                $testResourcePath = Join-Path (Split-Path -parent $PSScriptRoot) "\test\Resources\$fileName"
+                return $testResourcePath
+            }
+            $folderPath = 'Check-Xliff-Merge-With-Blank-Line'
+           
+            Remove-Item -Path (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.MERGED.testresult")) -ErrorAction SilentlyContinue
+            &$MergeXlfDocumentsScript `
+                -BaseFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.BASE.test")) `
+                -OurFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.LOCAL.test")) `
+                -TheirFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.REMOTE.test")) `
+                -ConflictHandlingMode UseAlwaysTheirs `
+                -NewDocumentBasedOn Theirs
+
+            $LASTEXITCODE | Should -Be 0            
+        }     
+    }
+
     Context "Validation check failed" {
         It "should detect double id" { 
             $MergeXlfDocumentsScript = Join-Path (Split-Path -parent $PSScriptRoot) "\src\Merge-XlfDocuments.ps1"
@@ -475,7 +561,6 @@ Describe "Theirs removed | Ours removed" {
                 -BaseFile (Get-TestResourcePath('Conflict-RemoteRemovedLocalRemoved\Test.de-DE.xlf.BASE.test')) `
                 -OurFile (Get-TestResourcePath('Conflict-RemoteRemovedLocalRemoved\Test.de-DE.xlf.LOCAL.test')) `
                 -TheirFile (Get-TestResourcePath('Conflict-RemoteRemovedLocalRemoved\Test.de-DE.xlf.REMOTE.test')) `
-                -ConflictHandlingMode UseAlwaysOurs `
                 -NewDocumentBasedOn Theirs
             $xmlElementsTransUnits = Get-TransUnitElements (Get-TestResourcePath('Conflict-RemoteRemovedLocalRemoved\Test.de-DE.xlf.MERGED.testresult'))
             $xmlElementsTransUnits.Count | Should -Be 2            

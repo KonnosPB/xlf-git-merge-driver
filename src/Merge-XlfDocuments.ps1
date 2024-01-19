@@ -1,6 +1,6 @@
 <#PSScriptInfo
 
-.VERSION 0.3.5.0
+.VERSION 0.9.0.0
 
 .GUID e88958ff-827a-4529-900a-9b5b3303d190
 
@@ -91,7 +91,7 @@ param(
     [Switch] $AllowClosingTags
 )
 # Variables
-$currVersion = '0.3.5.0'
+$currVersion = '0.9.0.0'
 $newDocumentBasedOnOurs = $false
 if ($NewDocumentBasedOn -eq 'Ours') {
     $newDocumentBasedOnOurs = $true
@@ -100,6 +100,8 @@ $newDocumentBasedOn = "Theirs"
 $otherFileBasedOn = "Ours"
 $newBaseFile = $TheirFile
 $otherFile = $OurFile
+$script:totalNumberOfConflictDiffs = 0
+$script:currentNumberOfConflictDiff = 0
 if ($newDocumentBasedOnOurs) {
     $newBaseFile = $OurFile
     $otherFile = $TheirFile
@@ -124,7 +126,6 @@ enum ConfictHandling {
     NewBase
 }
 
-
 function New-XlfDocument {
     param(
         [Parameter(Mandatory, Position = 0)]
@@ -148,7 +149,6 @@ function New-XlfDocument {
     }    
     return $xlfDocument
 }
-
 
 function New-IdTransUnitHashtable {
     param(
@@ -302,13 +302,10 @@ function Get-Diffs {
     }
 }
 
-function Get-TransUnitPrettyPrint {
+function Get-ConflictOutputTransUnitPrettyPrint {
     param(
         [Parameter(Mandatory, Position = 0)]
-        $XmlTransUnitElement,
-        [Parameter(Mandatory, Position = 1)]
-        [ValidateSet('added', 'modified', 'removed')]
-        [string] $ModificationType
+        $XmlTransUnitElement      
     )
 
     $stringWriter = [System.IO.StringWriter]::new()
@@ -324,30 +321,171 @@ function Get-TransUnitPrettyPrint {
     $xmlWriter.Flush()
     $stringWriter.Flush()     
     $out = $stringWriter.ToString()       
+    $splitOut = $out.Split("`n")
+    if ($splitOut.Count -gt 0){
+        $splitOut[0] = "        $($splitOut[0])"
+    }
+    return $splitOut
+}
 
-    $xmlDisplay = ''
-    $outerXml = $out.Split("`n")
-    $linePrefix = "+"
-    if ($ModificationType -eq 'modified') {
-        $linePrefix = "~"
+
+function Write-ConflictOutputModificationString{
+    param(       
+        [Parameter(Mandatory, Position = 0)]
+        [ValidateSet('added', 'modified', 'removed')]        
+        [string] $modificationType
+    )   
+    if ($modificationType -eq 'added'){
+        Write-Host '+' -ForegroundColor Green -NoNewline
     }
-    elseif ($ModificationType -eq 'removed') {
-        $linePrefix = "-"
+
+    if ($modificationType -eq 'modified'){
+        Write-Host '~' -ForegroundColor Blue -NoNewline
     }
-    for ($i = 0; $i -lt $outerXml.Count; $i++) {
-        $outerXmlLine = $outerXml[$i].Trim()
-        $indentationWhitespaces = "".PadLeft($XmlIndentation, " ")
-        $xmlDisplay += $linePrefix
-        if (($i -gt 0) -and ($i -lt $outerXml.Count - 1)) {
-            $indentationWhitespaces += "".PadLeft($XmlIndentation * 2, " ")
-        }                       
-        $xmlDisplay += $indentationWhitespaces
-        $xmlDisplay += $outerXmlLine
-        if ($i -lt $outerXml.Count - 1) {            
-            $xmlDisplay += $NewLineCharacters             
+
+    if ($modificationType -eq 'removed'){
+        Write-Host '-' -ForegroundColor Yellow -NoNewline
+    }
+}
+
+function Write-ConflictOutputText{
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string[]] $MainLines,
+        [Parameter(Mandatory, Position = 1)]        
+        [string[]] $CompareLines,
+        [Parameter(Mandatory, Position = 2)]
+        [ValidateSet('added', 'modified', 'removed')]
+        [string]$MainLinesModificationType
+    )
+   
+    for ($lineIndex = 0; $lineIndex -lt $MainLines.Count; $lineIndex++)
+    {
+        $MainLine = $MainLines[$lineIndex]
+        if (-not $MainLine){
+            $MainLine = ""
         }
+
+        $CompareLine = ""
+        if ($CompareLines.Count -gt $lineIndex){
+            $CompareLine = $CompareLines[$lineIndex]
+        }
+        Write-ConflictOutputModificationString $MainLinesModificationType
+        if ($MainLine -eq $CompareLine){
+            
+            [Console]::ResetColor()
+            Write-Host $MainLine
+            continue           
+        }
+
+        if (-not $CompareLine){
+            $CompareLine = ""
+        }
+       
+        #Compare per character
+        $MainLineChars = $MainLine.ToCharArray()
+        $MainLineCharsLen = $MainLineChars.Length              
+        $CompareLineChars = $CompareLine.ToCharArray()        
+        $CompareLineCharsLen = $CompareLineChars.Length       
+                       
+        for ($i = 0; $i -lt $MainLineCharsLen; $i++){
+            [string] $MainLineCharacter = $MainLineChars[$i]
+            if (-not $MainLineCharacter){
+                Write-Host $MainLineChars
+            }
+            if ($i -ge $CompareLineCharsLen){
+                Write-Host $MainLineCharacter -NoNewline -ForegroundColor Red 
+            }else{
+                if (($MainLineChars[$i] -ne $CompareLineChars[$i])){           
+                    Write-Host $MainLineCharacter -NoNewline -ForegroundColor Red
+                }else{
+                    [Console]::ResetColor()
+                    Write-Host $MainLineCharacter -NoNewline                
+                }                                
+            }
+        }
+        Write-Host 
     }
-    return $xmlDisplay
+}
+
+function Write-ConflictOutputDiff {
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string] $CurrentId,
+        [Parameter(Mandatory, Position = 1)]
+        $XmlNewBaseTransUnitElement,
+        [Parameter(Mandatory, Position = 2)]
+        [ValidateSet('added', 'modified', 'removed')]
+        [string]$NewBaseModificationType,
+        [Parameter(Mandatory, Position = 3)]
+        $XmlOtherTransUnitElement,
+        [Parameter(Mandatory, Position = 4)]
+        [ValidateSet('added', 'modified', 'removed')]
+        [string]$OtherModificationType
+    )   
+
+    $xmlOurTransUnitElement = $XmlNewBaseTransUnitElement
+    $xmlTheirTransUnitElement = $XmlOtherTransUnitElement
+    $ownModificationType = $NewBaseModificationType
+    $theirModificationType = $OtherModificationType
+    if ($newDocumentBasedOnOurs){
+        $ownModificationType = $OtherModificationType
+        $theirModificationType = $NewBaseModificationType
+        $xmlOurTransUnitElement = $XmlOtherTransUnitElement
+        $xmlTheirTransUnitElement = $XmlNewBaseTransUnitElement
+    }    
+    
+    [string[]]$ourLines = Get-ConflictOutputTransUnitPrettyPrint $xmlOurTransUnitElement
+    [string[]]$theirLines = Get-ConflictOutputTransUnitPrettyPrint $xmlTheirTransUnitElement
+
+    $script:currentNumberOfConflictDiff += 1
+    [Console]::ResetColor()
+    Write-Host "Conflict at trans-unit '$CurrentId'. ($script:currentNumberOfConflictDiff/$script:totalNumberOfConflictDiffs)"    
+    Write-Host "<<<<<<< ours:$FileName $ownModificationType"    
+    Write-ConflictOutputText $ourLines $theirLines $ownModificationType
+    [Console]::ResetColor()
+    Write-Host "======="    
+    Write-ConflictOutputText $theirLines $ourLines $theirModificationType
+    [Console]::ResetColor()
+    Write-Host ">>>>>>> theirs:$FileName $theirModificationType"
+}
+
+function Test-CanAutomerged{
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string] $CurrentId,
+        [Parameter(Mandatory, Position = 1)]
+        $XmlNewBaseTransUnitElement,
+        [Parameter(Mandatory, Position = 2)]
+        [ValidateSet('added', 'modified', 'removed')]
+        [string]$NewBaseModificationType,
+        [Parameter(Mandatory, Position = 3)]
+        $XmlOtherTransUnitElement,
+        [Parameter(Mandatory, Position = 4)]
+        [ValidateSet('added', 'modified', 'removed')]
+        [string]$OtherModificationType
+    )   
+
+    if(($XmlNewBaseTransUnitElement.source.InnerText -match " +") -and 
+       ($XmlNewBaseTransUnitElement.target.InnerText -match " +") -and 
+       ($XmlNewBaseTransUnitElement.target.state -eq "translated") -and 
+       ($XmlOtherTransUnitElement.source.InnerText -match " +") -and 
+       ($XmlOtherTransUnitElement.target.InnerText -match " *") -and 
+       ($XmlOtherTransUnitElement.target.state -eq "needs-review-translation")
+      ){
+        return [ConfictHandling]::NewBase
+    }
+
+    if(($XmlOtherTransUnitElement.source.InnerText -match " +") -and 
+       ($XmlOtherTransUnitElement.target.InnerText -match " +") -and 
+       ($XmlOtherTransUnitElement.target.state -eq "translated") -and 
+       ($XmlNewBaseTransUnitElement.source.InnerText -match " +") -and 
+       ($XmlNewBaseTransUnitElement.target.InnerText -match " *") -and 
+       ($XmlNewBaseTransUnitElement.target.state -eq "needs-review-translation")
+      ){
+        return [ConfictHandling]::Other
+    }
+    return [ConfictHandling]::Abort
 }
 
 function Confirm-Handling {
@@ -369,12 +507,10 @@ function Confirm-Handling {
         return [ConfictHandling]::Abort
     }
 
-    [string] $newBaseXmlDisplay = Get-TransUnitPrettyPrint $XmlNewBaseTransUnitElement $NewBaseModificationType
-    [string] $otherXmlDisplay = Get-TransUnitPrettyPrint $XmlOtherTransUnitElement $OtherModificationType
-    $completeUserMessage = "Conflict at trans-unit '$CurrentId'. $NewLineCharacters<<<<<<< ours:$FileName $OtherModificationType$NewLineCharacters$otherXmlDisplay$NewLineCharacters=======$NewLineCharacters$newBaseXmlDisplay$NewLineCharacters>>>>>>> theirs:$FileName $NewBaseModificationType$NewLineCharacters$($NewLineCharacters)Select ... and press enter`r`n(t)heirs`r`n(o)urs`r`n(at) always theirs`r`n(ao) always ours`r`n(c)ancel`r`n>"
-    if ($newDocumentBasedOnOurs) {
-        $completeUserMessage = "Conflict at trans-unit '$CurrentId'. $NewLineCharacters<<<<<<< ours:$FileName $NewBaseModificationType$NewLineCharacters$newBaseXmlDisplay$NewLineCharacters=======$NewLineCharacters$otherXmlDisplay$NewLineCharacters>>>>>>> theirs:$FileName $OtherModificationType$NewLineCharacters$($NewLineCharacters)Select ... and press enter`r`n(t)heirs`r`n(o)urs`r`n(at) always theirs`r`n(ao) always ours`r`n(c)ancel`r`n>"
-    }      
+    $handlingAutomerge = Test-CanAutomerged $CurrentId $XmlNewBaseTransUnitElement $NewBaseModificationType $XmlOtherTransUnitElement $OtherModificationType
+    if ($handlingAutomerge -ne [ConfictHandling]::Abort){
+        return  $handlingAutomerge
+    }           
     
     Write-Host "Conflict handling mode $script:ConflictHandlingMode"
     $result = ""
@@ -385,7 +521,9 @@ function Confirm-Handling {
         $result = "o" #ours
     }
     else {
-        $result = Read-Host $completeUserMessage
+        $currentNumberOfConflicDiff += 1
+        Write-ConflictOutputDiff $CurrentId $XmlNewBaseTransUnitElement $NewBaseModificationType $XmlOtherTransUnitElement $OtherModificationType
+        $result = Read-Host "`r`nSelect ... and press enter`r`n(t)heirs`r`n(o)urs`r`n(at) always theirs`r`n(ao) always ours`r`n(c)ancel`r`n>"
         $result = $result.ToLower().TrimStart()
         Write-Host "Entered '$result'"
         if ($result -eq 'at') {
@@ -467,6 +605,146 @@ function Remove-TransUnit {
         return
     }
     $null = $group.RemoveChild($elementToRemove)
+}
+
+function Get-TextDiff {
+
+}
+
+function Test-WillBeAConfirmDialog {
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string] $CurrentId,
+        [Parameter(Mandatory, Position = 1)]
+        $XmlNewBaseTransUnitElement,
+        [Parameter(Mandatory, Position = 2)]
+        [ValidateSet('added', 'modified', 'removed')]
+        [string]$NewBaseModificationType,
+        [Parameter(Mandatory, Position = 3)]
+        $XmlOtherTransUnitElement,
+        [Parameter(Mandatory, Position = 4)]
+        [ValidateSet('added', 'modified', 'removed')]
+        [string]$OtherModificationType
+    )   
+    if ($script:ConflictHandlingMode -eq 'Abort') {
+        return [ConfictHandling]::Abort
+    }
+
+    $handlingAutomerge = Test-CanAutomerged $CurrentId $XmlNewBaseTransUnitElement $NewBaseModificationType $XmlOtherTransUnitElement $OtherModificationType
+    if ($handlingAutomerge -ne [ConfictHandling]::Abort){
+        return $false
+    }    
+    
+    Write-Host "Conflict handling mode $script:ConflictHandlingMode"
+    if (($script:ConflictHandlingMode -ne 'UseAlwaysTheirs') -or ($script:ConflictHandlingMode -eq 'UseAlwaysOurs')) {            
+        return $true
+    }
+
+    return $false
+}
+
+function Update-TotalNumberOfDiffConflicts{
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [xml]$XlfNewBaseDocument,
+        [Parameter(Mandatory, Position = 1)]
+        $MainDiffsHashtables,
+        [Parameter(Mandatory, Position = 2)]
+        $CompareDiffsHashtables
+    )
+
+     #region Cases when other is added
+     $CompareDiffsHashtables.AddedHashTable.GetEnumerator() | ForEach-Object {      
+        $currentId = $_.Name
+        $xOtherElement = $_.Value
+
+        # Is newBase and other added?
+        $xNewBaseElement = $MainDiffsHashtables.AddedHashTable[$currentId]
+        if ($xNewBaseElement) {            
+            if ($xNewBaseElement.OuterXml.GetHashCode() -ne $xOtherElement.OuterXml.GetHashCode()) {                                                  
+                if (Test-WillBeAConfirmDialog $currentId $xNewBaseElement 'added'  $xOtherElement 'added'){               
+                    $script:totalNumberOfConflictDiffs += 1
+                }
+            }
+        }
+
+        # Is other added and newBase modified?
+        $xNewBaseElement = $MainDiffsHashtables.ModifiedHashTable[$currentId]
+        if ($xNewBaseElement) {                        
+            if ($xNewBaseElement.OuterXml.GetHashCode() -ne $xOtherElement.OuterXml.GetHashCode()) {                                                  
+                if (Test-WillBeAConfirmDialog $currentId $xNewBaseElement 'modified' $xOtherElement 'added'){               
+                    $script:totalNumberOfConflictDiffs += 1
+                }
+            }
+        }
+
+        # Is other added and newBase removed?
+        $xNewBaseElement = $MainDiffsHashtables.RemovedHashTable[$currentId]
+        if ($xNewBaseElement) {                            
+            if (Test-WillBeAConfirmDialog $currentId $xNewBaseElement 'removed' $xOtherElement 'added'){               
+                $script:totalNumberOfConflictDiffs += 1
+            }
+        }    
+    } 
+    #endregion Cases when other is added    
+    
+    #region Cases when other is modified
+    $CompareDiffsHashtables.ModifiedHashTable.GetEnumerator() | ForEach-Object {
+        $currentId = $_.Name
+        $xOtherElement = $_.Value
+
+        # Is newBase added and other modified?
+        $xNewBaseElement = $MainDiffsHashtables.AddedHashTable[$currentId]
+        if ($xNewBaseElement) {            
+            if ($xNewBaseElement.OuterXml.GetHashCode() -ne $xOtherElement.OuterXml.GetHashCode()) {                                                  
+                if (Test-WillBeAConfirmDialog $currentId $xNewBaseElement 'added' $xOtherElement 'modified'){               
+                    $script:totalNumberOfConflictDiffs += 1
+                }
+            }
+        }
+
+        # Is other and newBase modified?
+        $xNewBaseElement = $MainDiffsHashtables.ModifiedHashTable[$currentId]
+        if ($xNewBaseElement) {            
+            if ($xNewBaseElement.OuterXml.GetHashCode() -ne $xOtherElement.OuterXml.GetHashCode()) {                                                  
+                if (Test-WillBeAConfirmDialog $currentId $xNewBaseElement 'modified' $xOtherElement 'modified'){               
+                    $script:totalNumberOfConflictDiffs += 1
+                }
+            }
+        }
+
+        # Is other modified and newBase removed?
+        $xNewBaseElement = $MainDiffsHashtables.RemovedHashTable[$currentId]
+        if ($xNewBaseElement) {                             
+            if (Test-WillBeAConfirmDialog $currentId $xNewBaseElement 'removed' $xOtherElement 'modified'){               
+                $script:totalNumberOfConflictDiffs += 1
+            }
+        }       
+    }
+    #endregion Cases when other is modified
+
+    #region Cases when other is removed
+    $CompareDiffsHashtables.RemovedHashTable.GetEnumerator() | ForEach-Object {
+        $currentId = $_.Name
+        $xOtherElement = $_.Value
+
+        # Is other removed and newBase added
+        $xNewBaseElement = $MainDiffsHashtables.AddedHashTable[$currentId]
+        if ($xNewBaseElement) {       
+            if (Test-WillBeAConfirmDialog $currentId $xNewBaseElement 'added' $xOtherElement 'removed'){               
+                $script:totalNumberOfConflictDiffs += 1
+            }
+        }
+
+        # Is other removed and newBase modified
+        $xNewBaseElement = $MainDiffsHashtables.ModifiedHashTable[$currentId]
+        if ($xNewBaseElement) {                
+            if (Test-WillBeAConfirmDialog $currentId $xNewBaseElement 'modified' $xOtherElement 'removed'){               
+                $script:totalNumberOfConflictDiffs += 1
+            }
+        }
+    }
+    #endregion
 }
 
 function Merge-XlfDocument {
@@ -715,6 +993,7 @@ try {
     $otherIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $otherFile $otherFileBasedOn
     $NewBaseDiffs = Get-Diffs $newBaseIdTransUnitHashtable
     $OtherDiffs = Get-Diffs $otherIdTransUnitHashtable
+    Update-TotalNumberOfDiffConflicts $xlfNewBaseDocument $NewBaseDiffs $OtherDiffs
     $null = Merge-XlfDocument $xlfNewBaseDocument $NewBaseDiffs $OtherDiffs
     if ($OurFile.EndsWith("LOCAL.test")) {
         $OurFile = $OurFile.Replace("LOCAL.test", "MERGED.testresult")  # Debug Reason. (normally the files ends with xlf. "LOCAL.xml" is test case)
