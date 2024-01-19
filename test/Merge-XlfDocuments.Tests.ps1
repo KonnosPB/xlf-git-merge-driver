@@ -76,6 +76,28 @@ Describe "Automerge test" {
 }
 
 Describe "Real world bugs test" {
+    Context "Merge with conflict and blank line with diff color change" {
+        It "should run without sucessfull without exceptions" { 
+            $MergeXlfDocumentsScript = Join-Path (Split-Path -parent $PSScriptRoot) "\src\Merge-XlfDocuments.ps1"
+
+            function Get-TestResourcePath($fileName) {
+                $testResourcePath = Join-Path (Split-Path -parent $PSScriptRoot) "\test\Resources\$fileName"
+                return $testResourcePath
+            }
+            $folderPath = 'Check-Xliff-Merge-With-Blank-Line'
+           
+            Remove-Item -Path (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.MERGED.testresult")) -ErrorAction SilentlyContinue
+            &$MergeXlfDocumentsScript `
+                -BaseFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.BASE.test")) `
+                -OurFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.LOCAL.test")) `
+                -TheirFile (Get-TestResourcePath("$folderPath\Test.de-DE.xlf.REMOTE.test")) `
+                -ConflictHandlingMode UseAlwaysTheirs `
+                -NewDocumentBasedOn Theirs
+
+            $LASTEXITCODE | Should -Be 0            
+        }     
+    }
+
     Context "Validation check failed" {
         It "should detect double id" { 
             $MergeXlfDocumentsScript = Join-Path (Split-Path -parent $PSScriptRoot) "\src\Merge-XlfDocuments.ps1"
@@ -539,7 +561,6 @@ Describe "Theirs removed | Ours removed" {
                 -BaseFile (Get-TestResourcePath('Conflict-RemoteRemovedLocalRemoved\Test.de-DE.xlf.BASE.test')) `
                 -OurFile (Get-TestResourcePath('Conflict-RemoteRemovedLocalRemoved\Test.de-DE.xlf.LOCAL.test')) `
                 -TheirFile (Get-TestResourcePath('Conflict-RemoteRemovedLocalRemoved\Test.de-DE.xlf.REMOTE.test')) `
-                -ConflictHandlingMode UseAlwaysOurs `
                 -NewDocumentBasedOn Theirs
             $xmlElementsTransUnits = Get-TransUnitElements (Get-TestResourcePath('Conflict-RemoteRemovedLocalRemoved\Test.de-DE.xlf.MERGED.testresult'))
             $xmlElementsTransUnits.Count | Should -Be 2            
