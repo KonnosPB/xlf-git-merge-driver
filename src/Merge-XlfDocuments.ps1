@@ -1,6 +1,6 @@
 <#PSScriptInfo
 
-.VERSION 0.9.0.0
+.VERSION 0.9.1.0
 
 .GUID e88958ff-827a-4529-900a-9b5b3303d190
 
@@ -85,13 +85,13 @@ param(
     [ValidateRange(0, 16)]
     [int] $XmlIndentation = 2,
     [Parameter()]    
-    [ValidateSet("Both", "Theirs", "Ours", "NoCheck")]
-    [string] $CheckDocument = "Both",
+    [ValidateSet("NoCheck", "xliff-core-1.2-strict.xsd", "xliff-core-1.2-transitional.xsd")]
+    [string] $CheckDocument = "xliff-core-1.2-transitional.xsd",    
     [Parameter()]        
     [Switch] $AllowClosingTags
 )
 # Variables
-$currVersion = '0.9.0.0'
+$currVersion = '0.9.1.0'
 $newDocumentBasedOnOurs = $false
 if ($NewDocumentBasedOn -eq 'Ours') {
     $newDocumentBasedOnOurs = $true
@@ -159,76 +159,16 @@ function New-IdTransUnitHashtable {
         [Parameter(Mandatory, Position = 2)]
         [ValidateSet("Theirs", "Ours", "Base")]
         [string] $CurrentDocumentSource
-    )   
-    
-    $errExitCode = 2
-    $xliffFile = $XlfDocument.xliff.file    
-    $errorOccured = $false   # Collect all messages and exit at the end if check fails.    
+    )       
     $resultIdHashtable = [ordered]@{}
     $XmlElementsTransUnits | ForEach-Object {
         $xmlElementsTransUnit = $_
-        $skipThisTransUnit = $false
-        
-        if ($CheckDocument){                         
-            if (-not $xmlElementsTransUnit.id){
-                Write-Error "($CurrentDocumentSource document) trans-unit id attribute missing`r`n$($xmlElementsTransUnit.OuterXml)"
-                $skipThisTransUnit = $true
-                $errorOccured = $true
-            } else{
-                if ([string]::IsNullOrWhiteSpace($xmlElementsTransUnit.id)){
-                    Write-Error "($CurrentDocumentSource document) trans-unit id attribute value is empty`r`n$($xmlElementsTransUnit.OuterXml)"
-                    $skipThisTransUnit = $true
-                    $errorOccured = $true
-                } else {
-                    if ($resultIdHashtable.Contains($xmlElementsTransUnit.id)){
-                        Write-Error "($CurrentDocumentSource document) trans-unit id '$($xmlElementsTransUnit.id)' used several times"
-                        $skipThisTransUnit = $true
-                        $errorOccured = $true
-                    }
-                }
-            }          
-    
-            if ($null -eq $xmlElementsTransUnit.source){
-                Write-Error "($CurrentDocumentSource document) <source> xml-tag missing in trans-unit element with id '$($xmlElementsTransUnit.id)'"
-                $skipThisTransUnit = $true
-                $errorOccured = $true
-            }
-    
-            if ($xmlElementsTransUnit.source.Count -gt 1){
-                Write-Error "($CurrentDocumentSource document) <source> xml-tag used multiple times in trans-unit element with id '$($xmlElementsTransUnit.id)'"
-                $skipThisTransUnit = $true
-                $errorOccured = $true
-            }
-                
-            if ($xliffFile.Attributes["source-language"].Value -ne $xliffFile.Attributes["target-language"].Value)
-            {
-                if ($null -eq $xmlElementsTransUnit.target){
-                    Write-Error "($CurrentDocumentSource document) <target> xml-tag missing in trans-unit element with id '$($xmlElementsTransUnit.id)'"
-                    $skipThisTransUnit = $true
-                    $errorOccured = $true
-                }
-                
-                if ($xmlElementsTransUnit.target.Count -gt 1){
-                    Write-Error "($CurrentDocumentSource document) <target> xml-tag used multiple times in trans-unit element with id '$($xmlElementsTransUnit.id)'"
-                    $skipThisTransUnit = $true
-                    $errorOccured = $true
-                }
-                
-                if (-not ($xmlElementsTransUnit.target.state -In @('translated', 'new', 'needs-review-translation', 'final'))){
-                    Write-Error "($CurrentDocumentSource document) target state attribute has not the value 'translated', 'new', 'needs-review-translation' or 'final' in trans-unit element with id '$($xmlElementsTransUnit.id)'"
-                    $skipThisTransUnit = $true
-                    $errorOccured = $true
-                }
-            }                   
-        } # if ($CheckDocument){   
+        $skipThisTransUnit = $false            
 
         if (-not $skipThisTransUnit){
             $resultIdHashtable.add($xmlElementsTransUnit.id, $xmlElementsTransUnit);
         }
-    }
-    if ($errorOccured){
-        exit($errExitCode)     
-    }
+    }    
     return $resultIdHashtable
 }
 
@@ -984,9 +924,45 @@ function Write-Xml {
     Set-Content -Pass $Path -Value $xmlString -Encoding utf8 | Out-Null
 }
 
+function Test-XliffFile {
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string] $File,    
+        [Parameter(Mandatory, Position = 1)]    
+        [ValidateSet("NoCheck", "xliff-core-1.2-strict.xsd", "xliff-core-1.2-transitional.xsd")]
+        [string] $CheckDocument
+    ) 
+    if (-not $CheckDocument -or $CheckDocument -eq "NoCheck"){
+        return
+    } 
+    
+    $xsdPath = $PSScriptRoot -join "\$CheckDocument"                
+    $settings = New-Object System.Xml.XmlReaderSettings
+    if (@("xliff-core-1.2-strict.xsd", "xliff-core-1.2-transitional.xsd") -contains $CheckDocument){
+        $settings.Schemas.Add("urn:oasis:names:tc:xliff:document:1.2", $xsdPath)
+    }
+    $settings.ValidationType = "Schema"
+    $errors = $false    
+    $settings.add_ValidationEventHandler({
+        param($sender, $e)        
+        Write-Host "(Line $($e.Exception.LineNumber), Position $($e.Exception.LinePosition)) Error: $($e.Message)" -ForegroundColor Red
+        Write-Host
+        $errors = $true
+    })
+    $reader = [System.Xml.XmlReader]::Create($xmlPath, $settings)
+    while ($reader.Read()) {}
+    $reader.Close()
+    if ($errors){
+        Write-Host "$xmlPath ist ungültig" -BackgroundColor Red
+        exit(2)  
+    }      
+}
+
 Write-Host "Merging $FileName with xlf-merger-driver $currVersion"
 
 try {       
+    Test-XliffFile -File $OurFile -CheckDocument $CheckDocument 
+    Test-XliffFile -File $TheirFile -CheckDocument $CheckDocument
     $baseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $BaseFile Base
     [xml]$xlfNewBaseDocument = New-XlfDocument $newBaseFile $newDocumentBasedOn
     $newBaseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocument $xlfNewBaseDocument $newDocumentBasedOn
