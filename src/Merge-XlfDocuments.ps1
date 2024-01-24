@@ -930,30 +930,33 @@ function Test-XliffFile {
         [string] $File,    
         [Parameter(Mandatory, Position = 1)]    
         [ValidateSet("NoCheck", "xliff-core-1.2-strict.xsd", "xliff-core-1.2-transitional.xsd")]
-        [string] $CheckDocument
+        [string] $CheckDocument,
+        [Parameter(Mandatory, Position = 2)]
+        [ValidateSet("Their", "Our", "Base")]
+        [string] $CurrentDocumentSource       
     ) 
     if (-not $CheckDocument -or $CheckDocument -eq "NoCheck"){
         return
     } 
     
-    $xsdPath = $PSScriptRoot -join "\$CheckDocument"                
+    $xsdPath = "$PSScriptRoot\$CheckDocument"                
     $settings = New-Object System.Xml.XmlReaderSettings
     if (@("xliff-core-1.2-strict.xsd", "xliff-core-1.2-transitional.xsd") -contains $CheckDocument){
         $settings.Schemas.Add("urn:oasis:names:tc:xliff:document:1.2", $xsdPath)
     }
     $settings.ValidationType = "Schema"
-    $errors = $false    
+    $script:testXliffFileErrorOccured = $false    
     $settings.add_ValidationEventHandler({
-        param($sender, $e)        
+        param($senderObject, $e)        
         Write-Host "(Line $($e.Exception.LineNumber), Position $($e.Exception.LinePosition)) Error: $($e.Message)" -ForegroundColor Red
         Write-Host
-        $errors = $true
+        $script:testXliffFileErrorOccured = $true
     })
-    $reader = [System.Xml.XmlReader]::Create($xmlPath, $settings)
+    $reader = [System.Xml.XmlReader]::Create($File, $settings)
     while ($reader.Read()) {}
     $reader.Close()
-    if ($errors){
-        Write-Host "$xmlPath ist ungültig" -BackgroundColor Red
+    if ($script:testXliffFileErrorOccured){
+        Write-Host "$CurrentDocumentSource file is invalid" -BackgroundColor Red
         exit(2)  
     }      
 }
@@ -961,8 +964,8 @@ function Test-XliffFile {
 Write-Host "Merging $FileName with xlf-merger-driver $currVersion"
 
 try {       
-    Test-XliffFile -File $OurFile -CheckDocument $CheckDocument 
-    Test-XliffFile -File $TheirFile -CheckDocument $CheckDocument
+    Test-XliffFile -File $OurFile -CheckDocument $CheckDocument -CurrentDocumentSource Our
+    Test-XliffFile -File $TheirFile -CheckDocument $CheckDocument -CurrentDocumentSource Their
     $baseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocumentFromFile $BaseFile Base
     [xml]$xlfNewBaseDocument = New-XlfDocument $newBaseFile $newDocumentBasedOn
     $newBaseIdTransUnitHashtable = New-IdTransUnitHashtableByXmlDocument $xlfNewBaseDocument $newDocumentBasedOn
