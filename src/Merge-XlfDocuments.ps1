@@ -945,6 +945,8 @@ function Test-XliffFile {
         $settings.Schemas.Add("urn:oasis:names:tc:xliff:document:1.2", $xsdPath)
     }
     $settings.ValidationType = "Schema"
+    #$settings.ValidationFlags = [System.Xml.Schema.XmlSchemaValidationFlags]::ProcessIdentityConstraints -bor [System.Xml.Schema.XmlSchemaValidationFlags]::AllowXmlAttributes -bor [System.Xml.Schema.XmlSchemaValidationFlags]::ReportValidationWarnings
+    #$settings.ValidationFlags = [System.Xml.Schema.XmlSchemaValidationFlags]::ProcessIdentityConstraints -bor [System.Xml.Schema.XmlSchemaValidationFlags]::AllowXmlAttributes -bor [System.Xml.Schema.XmlSchemaValidationFlags]::ProcessSchemaLocation -bor [System.Xml.Schema.XmlSchemaValidationFlags]::ProcessInlineSchema     
     $script:testXliffFileErrorOccured = $false    
     $settings.add_ValidationEventHandler({
         param($senderObject, $e)        
@@ -953,7 +955,61 @@ function Test-XliffFile {
         $script:testXliffFileErrorOccured = $true
     })
     $reader = [System.Xml.XmlReader]::Create($File, $settings)
-    while ($reader.Read()) {}
+    while ($reader.Read())     
+    {
+        if ($reader.Name -eq 'trans-unit'){
+            $transUnitReader = $reader.ReadSubtree()
+            $sourceExist = $false
+            $sourceIdExist = $false
+            $targetExist = $false  
+            $targetIdExist = $false                      
+            while ($transUnitReader.Read())     
+            {
+                if ($transUnitReader.Name -eq 'source'){
+                    $sourceExist = $true
+                    $attribute = $transUnitReader.GetAttribute('Id');
+                }
+                if ($transUnitReader.Name -eq 'target'){
+                    $targetExist = $true
+                    $attribute = $transUnitReader.GetAttribute('Id');
+                }                                
+            }
+            if (-not $sourceExist)
+            {
+                Write-Host "(Line $($reader.LineNumber), Position $($reader.LinePosition)) Error: Source missing" -ForegroundColor Red
+                Write-Host
+                $script:testXliffFileErrorOccured = $true
+            }
+            if (-not $targetExist)
+            {
+                Write-Host "(Line $($reader.LineNumber), Position $($reader.LinePosition)) Error: Target missing" -ForegroundColor Red
+                Write-Host
+                $script:testXliffFileErrorOccured = $true
+            }
+        }
+
+        #Write-Host $reader.Name
+        # if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Attribute)        
+        # {
+        #     Write-Host "(Line $($reader.LineNumber), Position $($reader.LinePosition)) Error: ID is missing" -ForegroundColor Red
+        #     Write-Host            
+        #     $script:testXliffFileErrorOccured = $true
+        # }
+
+        # if ($reader.Name -eq 'Id')        
+        # {
+        #     Write-Host "(Line $($reader.LineNumber), Position $($reader.LinePosition)) Error: ID is missing" -ForegroundColor Red
+        #     Write-Host            
+        #     $script:testXliffFileErrorOccured = $true
+        # }
+
+        # if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Attribute -and $reader.Name -eq 'Id' -and [string]::IsNullOrWhiteSpace($reader.Value))        
+        # {
+        #     Write-Host "(Line $($reader.LineNumber), Position $($reader.LinePosition)) Error: ID is missing" -ForegroundColor Red
+        #     Write-Host            
+        #     $script:testXliffFileErrorOccured = $true
+        # }
+    }
     $reader.Close()
     if ($script:testXliffFileErrorOccured){
         Write-Host "$CurrentDocumentSource file is invalid" -BackgroundColor Red
